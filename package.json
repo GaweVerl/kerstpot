@@ -1,0 +1,1 @@
+{"name":"familie-secret-santa","private":true,"type":"module","scripts":{"build":"node scripts/build.mjs","test":"node --test","preview":"node scripts/preview.mjs"},"engines":{"node":">=22"},"devDependencies":{"@electric-sql/pglite":"^0.5.8"}}
