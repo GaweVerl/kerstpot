@@ -1,0 +1,37 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { PGlite } from '@electric-sql/pglite';
+import handler from '../netlify/functions/santa.mjs';
+test('Aanmelden, privacy, unieke trekking en herhaalde klikken', async()=>{
+  const db=new PGlite();
+  await db.exec('create role anon; create role authenticated; create role service_role;');
+  await db.exec(await readFile(new URL('../supabase.sql',import.meta.url),'utf8'));
+  const call=async(a,t,n='')=>(await db.query('select kerstpot_action($1,$2,$3) as result',[a,t,n])).rows[0].result;
+  assert.ok((await call('draw','owner')).error);
+  assert.deepEqual(await call('join','a','Anna'),{ok:true});
+  assert.ok((await call('join','b','anna')).error);
+  await call('join','b','Bram'); await call('join','c','Chris');
+  assert.ok((await call('reveal','a')).error);
+  await call('join','a','Anders');
+  const state=await call('status','a');assert.equal(state.me,'Anna');assert.equal(state.names.length,3);assert.equal(state.recipient,undefined);
+  assert.equal((await call('status','unknown')).me,null);
+  await call('draw','owner');
+  const recipients=await Promise.all(['a','b','c'].map(t=>call('reveal',t)));
+  assert.equal(new Set(recipients.map(r=>r.recipient)).size,3);
+  ['Anna','Bram','Chris'].forEach((name,i)=>assert.notEqual(name,recipients[i].recipient));
+  await call('draw','owner');assert.deepEqual(await call('reveal','a'),recipients[0]);
+  assert.ok((await call('join','d','Daan')).error);assert.ok((await call('reveal','unknown')).error);
+  await db.exec('set role anon');
+  await assert.rejects(db.query("select kerstpot_action('draw','x','')"));
+  await assert.rejects(db.query('select * from kerstpot_people'));
+  await db.close();
+});
+test('API weigert onbevoegd beheer en verzoeken vanaf andere sites',async()=>{
+  process.env.SUPABASE_URL='https://example.supabase.co';process.env.SUPABASE_SECRET_KEY='test';process.env.OWNER_PASSWORD='a-long-owner-password';
+  const request=(body,origin='https://kerst.test')=>new Request('https://kerst.test/.netlify/functions/santa',{method:'POST',headers:{origin},body:JSON.stringify(body)});
+  assert.equal((await handler(request({action:'draw',token:'a'.repeat(36),password:'wrong'}))).status,403);
+  assert.equal((await handler(request({action:'status',token:'a'.repeat(36)},'https://other.test'))).status,403);
+  assert.equal((await handler(request(null))).status,400);
+  assert.equal((await handler(request({action:'join',token:'a'.repeat(36),name:' '}))).status,400);
+});
